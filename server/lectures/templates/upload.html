@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Upload Lecture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 900px; }
+    label { display: block; margin-top: 12px; }
+    input { width: 100%; padding: 8px; margin-top: 6px; }
+    button { margin-top: 12px; padding: 10px 14px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .status { margin-top: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Upload Lecture</h1>
+  <p>Log in as an instructor, then upload a lecture video.</p>
+
+  <form id="uploadForm">
+    <div class="row">
+      <div>
+        <label>Username
+          <input id="username" autocomplete="username" required />
+        </label>
+      </div>
+      <div>
+        <label>Password
+          <input id="password" type="password" autocomplete="current-password" required />
+        </label>
+      </div>
+    </div>
+
+    <label>Title
+      <input id="title" required />
+    </label>
+
+    <label>Video file
+      <input id="video_file" type="file" accept="video/*" required />
+    </label>
+
+    <button type="submit">Upload</button>
+  </form>
+
+  <div id="status" class="status"></div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    async function postJson(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+      }
+      return await res.json();
+    }
+
+    async function postFormData(url, formData, accessToken) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        body: formData,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+      }
+      return await res.json();
+    }
+
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      setStatus('Logging in...');
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const title = document.getElementById('title').value.trim();
+      const fileInput = document.getElementById('video_file');
+      const file = fileInput.files && fileInput.files[0];
+
+      try {
+        if (!file) throw new Error('Pick a video file first');
+
+        const token = await postJson('/api/auth/token/', { username, password });
+        setStatus('Uploading...');
+
+        const fd = new FormData();
+        fd.append('title', title);
+        fd.append('video_file', file);
+
+        const lecture = await postFormData('/api/lectures/', fd, token.access);
+        setStatus(
+          `Uploaded lecture id=${lecture.id}.\n` +
+          `Browse: ${window.location.origin}/lectures/\n` +
+          `Watch: ${window.location.origin}/watch/?lecture_id=${encodeURIComponent(lecture.id)}`
+        );
+      } catch (err) {
+        setStatus(String(err));
+      }
+    });
+  </script>
+</body>
+</html>

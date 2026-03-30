@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lectures</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 900px; }
+    label { display: block; margin-top: 12px; }
+    input { width: 100%; padding: 8px; margin-top: 6px; }
+    button { margin-top: 12px; padding: 10px 14px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .status { margin-top: 12px; white-space: pre-wrap; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { border-bottom: 1px solid #ddd; padding: 10px; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Lectures</h1>
+  <p>Log in, then load the lecture list. Click Watch to open the player.</p>
+
+  <form id="browseForm">
+    <div class="row">
+      <div>
+        <label>Username
+          <input id="username" autocomplete="username" required />
+        </label>
+      </div>
+      <div>
+        <label>Password
+          <input id="password" type="password" autocomplete="current-password" required />
+        </label>
+      </div>
+    </div>
+
+    <button type="submit">Load lectures</button>
+  </form>
+
+  <div id="status" class="status"></div>
+
+  <table id="table" style="display:none">
+
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Title</th>
+        <th></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const tableEl = document.getElementById('table');
+    const tbodyEl = document.getElementById('tbody');
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    async function postJson(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+      }
+      return await res.json();
+    }
+
+    async function getJson(url, accessToken) {
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+      }
+      return await res.json();
+    }
+
+
+    let currentToken = null;
+
+    function renderLectures(lectures) {
+      tbodyEl.innerHTML = '';
+      for (const lec of lectures) {
+        const tr = document.createElement('tr');
+
+        const tdId = document.createElement('td');
+        tdId.textContent = String(lec.id);
+
+        const tdTitle = document.createElement('td');
+        tdTitle.textContent = lec.title || '';
+
+        const tdAction = document.createElement('td');
+        const a = document.createElement('a');
+        a.textContent = 'Watch';
+        a.href = `/watch/?lecture_id=${encodeURIComponent(lec.id)}`;
+        tdAction.appendChild(a);
+
+        const tdTranscode = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.textContent = 'Transcode HLS';
+        btn.onclick = async () => {
+          btn.disabled = true;
+          btn.textContent = 'Working...';
+          setStatus(`Transcoding lecture ${lec.id}...`);
+          try {
+            const res = await fetch(`/api/lectures/${lec.id}/transcode_hls/`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${currentToken}` },
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || data.error || res.statusText);
+            setStatus(`Lecture ${lec.id} transcoded!`);
+            btn.textContent = 'Done';
+          } catch (err) {
+            setStatus('Transcode failed: ' + err);
+            btn.textContent = 'Transcode HLS';
+            btn.disabled = false;
+          }
+        };
+        tdTranscode.appendChild(btn);
+
+        tr.appendChild(tdId);
+        tr.appendChild(tdTitle);
+        tr.appendChild(tdAction);
+        tr.appendChild(tdTranscode);
+        tbodyEl.appendChild(tr);
+      }
+      tableEl.style.display = '';
+    }
+
+    document.getElementById('browseForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      tableEl.style.display = 'none';
+      setStatus('Logging in...');
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      try {
+        const token = await postJson('/api/auth/token/', { username, password });
+        currentToken = token.access;
+        setStatus('Loading lectures...');
+
+        const lectures = await getJson('/api/lectures/', token.access);
+        setStatus(`Loaded ${lectures.length} lecture(s).`);
+        renderLectures(lectures);
+      } catch (err) {
+        setStatus(String(err));
+      }
+    });
+  </script>
+</body>
+</html>

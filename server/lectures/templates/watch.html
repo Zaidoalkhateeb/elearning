@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Watch Lecture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 900px; }
+    label { display: block; margin-top: 12px; }
+    input { width: 100%; padding: 8px; margin-top: 6px; }
+    button { margin-top: 12px; padding: 10px 14px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .status { margin-top: 12px; white-space: pre-wrap; }
+    video { margin-top: 16px; width: 100%; background: #000; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+  <h1>Watch Lecture</h1>
+
+  <p>This page logs in, gets a signed playback URL, then plays the video.</p>
+
+  <form id="watchForm">
+    <div class="row">
+      <div>
+        <label>Username
+          <input id="username" autocomplete="username" required />
+        </label>
+      </div>
+      <div>
+        <label>Password
+          <input id="password" type="password" autocomplete="current-password" required />
+        </label>
+      </div>
+    </div>
+
+    <label>Lecture ID
+      <input id="lectureId" type="number" min="1" required />
+    </label>
+
+    <button type="submit">Play</button>
+  </form>
+
+  <div id="status" class="status"></div>
+
+  <video id="video" controls playsinline></video>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const videoEl = document.getElementById('video');
+    let hls = null;
+
+  (function prefillFromQuery() {
+    const params = new URLSearchParams(window.location.search);
+    const lectureId = params.get('lecture_id');
+    if (lectureId) {
+      document.getElementById('lectureId').value = String(lectureId);
+    }
+  })();
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    function absoluteUrl(maybeRelative) {
+      if (!maybeRelative) return maybeRelative;
+      if (maybeRelative.startsWith('http://') || maybeRelative.startsWith('https://')) return maybeRelative;
+      return window.location.origin + maybeRelative;
+    }
+
+    async function postJson(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+      }
+      return await res.json();
+    }
+
+    async function getJson(url, accessToken) {
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+      }
+      return await res.json();
+    }
+
+    function stopCurrentPlayback() {
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+      videoEl.pause();
+      videoEl.removeAttribute('src');
+      videoEl.load();
+    }
+
+    function playUrl(url) {
+      stopCurrentPlayback();
+
+      const finalUrl = absoluteUrl(url);
+      if (!finalUrl) throw new Error('Missing playback URL');
+
+      // If it's HLS manifest, use hls.js when needed.
+      if (finalUrl.includes('.m3u8') || finalUrl.includes('/hls/manifest/')) {
+        if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+          videoEl.src = finalUrl;
+          return;
+        }
+        if (window.Hls && window.Hls.isSupported()) {
+          hls = new window.Hls();
+          hls.loadSource(finalUrl);
+          hls.attachMedia(videoEl);
+          return;
+        }
+        throw new Error('HLS is not supported in this browser');
+      }
+
+      // Otherwise treat as direct stream URL.
+      videoEl.src = finalUrl;
+    }
+
+    document.getElementById('watchForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      setStatus('Logging in...');
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const lectureId = Number(document.getElementById('lectureId').value);
+
+      try {
+        const token = await postJson('/api/auth/token/', { username, password });
+        setStatus('Fetching playback URL...');
+
+        const playback = await getJson(`/api/lectures/${lectureId}/playback/`, token.access);
+        setStatus(`Playing. Token expires in ${playback.expires_in_seconds}s`);
+
+        playUrl(playback.playback_url);
+        await videoEl.play();
+      } catch (err) {
+        setStatus(String(err));
+      }
+    });
+  </script>
+</body>
+</html>
